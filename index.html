@@ -14,6 +14,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <style>
     :root {
@@ -177,12 +178,15 @@
     .purpose-stat small { font-weight: 400; font-size: 12px; color: var(--label); }
     .bar-track { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
     .bar-fill { height: 100%; border-radius: 4px; transition: width 0.7s cubic-bezier(0.34,1.56,0.64,1); }
+    .export-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
     .export-btn {
-      width: 100%; padding: 15px; border-radius: 14px; border: 2px solid var(--blue);
-      background: transparent; color: var(--blue); font-size: 15px; font-weight: 700;
-      cursor: pointer; font-family: 'Figtree', sans-serif; margin-top: 4px; transition: all 0.15s;
+      width: 100%; padding: 14px 8px; border-radius: 14px; border: 2px solid var(--blue);
+      background: transparent; color: var(--blue); font-size: 14px; font-weight: 700;
+      cursor: pointer; font-family: 'Figtree', sans-serif; transition: all 0.15s;
     }
     .export-btn:active { background: var(--blue); color: #fff; }
+    .export-btn.green { border-color: var(--green); color: var(--green); }
+    .export-btn.green:active { background: var(--green); color: #fff; }
 
     /* EMPTY */
     .empty { text-align: center; color: var(--label); font-size: 14px; padding: 48px 0; font-weight: 500; }
@@ -295,7 +299,10 @@
       <div class="card-title">By Purpose</div>
       <div id="sum-bars"></div>
     </div>
-    <button class="export-btn" id="export-btn" onclick="exportCSV()" style="display:none">↓ Export CSV for Tax</button>
+    <div class="export-row" id="export-btn" style="display:none">
+      <button class="export-btn" onclick="exportCSV()">↓ CSV</button>
+      <button class="export-btn green" onclick="exportXLSX()">↓ Excel</button>
+    </div>
     <div class="empty" id="sum-empty">No data yet — start logging journeys!</div>
   </div>
 
@@ -523,7 +530,7 @@ function renderSummary() {
   `).join('');
 }
 
-// ---- EXPORT ----
+// ---- EXPORT CSV ----
 function exportCSV() {
   const header = 'Date,From,To,Purpose,Kilometres,Notes\n';
   const rows = journeys.map(j =>
@@ -534,6 +541,71 @@ function exportCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = 'km-journeys.csv';
   a.click();
+}
+
+// ---- EXPORT XLSX ----
+function exportXLSX() {
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: Journeys ──
+  const headerRow = ['Date', 'From', 'To', 'Purpose', 'Kilometres', 'Notes'];
+  const dataRows = journeys.map(j => [j.date, j.from, j.to, j.purpose, j.km, j.notes]);
+  const total = journeys.reduce((s, j) => s + j.km, 0);
+  const totalRow = ['TOTAL', '', '', '', total, ''];
+
+  const wsData = [headerRow, ...dataRows, totalRow];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Column widths
+  ws['!cols'] = [
+    { wch: 14 }, // Date
+    { wch: 22 }, // From
+    { wch: 22 }, // To
+    { wch: 12 }, // Purpose
+    { wch: 13 }, // Kilometres
+    { wch: 30 }, // Notes
+  ];
+
+  // Style header row (row 1) and total row
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let C = range.s.c; C <= range.e.c; C++) {
+    // Header
+    const hCell = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (!ws[hCell]) ws[hCell] = {};
+    ws[hCell].s = {
+      font: { bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { fgColor: { rgb: '0A84FF' } },
+      alignment: { horizontal: 'center' },
+    };
+    // Total row
+    const tCell = XLSX.utils.encode_cell({ r: dataRows.length + 1, c: C });
+    if (!ws[tCell]) ws[tCell] = {};
+    ws[tCell].s = {
+      font: { bold: true },
+      fill: { fgColor: { rgb: 'E5F0FF' } },
+    };
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Journeys');
+
+  // ── Sheet 2: Summary by Purpose ──
+  const purposes = ['Work', 'Medical', 'Charity', 'Personal'];
+  const sumRows = [['Purpose', 'Trips', 'Kilometres']];
+  purposes.forEach(p => {
+    const trips = journeys.filter(j => j.purpose === p);
+    if (trips.length > 0) {
+      sumRows.push([p, trips.length, trips.reduce((s, j) => s + j.km, 0)]);
+    }
+  });
+  sumRows.push(['TOTAL', journeys.length, total]);
+
+  const ws2 = XLSX.utils.aoa_to_sheet(sumRows);
+  ws2['!cols'] = [{ wch: 14 }, { wch: 8 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Summary');
+
+  // Download
+  const fy = new Date().getFullYear();
+  XLSX.writeFile(wb, `km-logbook-${fy}.xlsx`);
 }
 
 // ---- SERVICE WORKER (offline support) ----
