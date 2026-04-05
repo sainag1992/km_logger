@@ -253,6 +253,17 @@
 
       <div class="grid-2">
         <div class="field">
+          <label>Start Time</label>
+          <input class="input" type="time" id="f-time-start" />
+        </div>
+        <div class="field">
+          <label>End Time</label>
+          <input class="input" type="time" id="f-time-end" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
           <label>Start Odometer</label>
           <input class="input" type="number" id="f-odo-start" placeholder="e.g. 45231" min="0" step="1" inputmode="numeric" oninput="updateDistPreview()" />
         </div>
@@ -344,7 +355,9 @@ window.addEventListener('DOMContentLoaded', () => {
   // Set today's date
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('f-date').value = today;
-  // Pre-fill start odometer from last journey
+  // Pre-fill start odometer and time from last journey or current time
+  const nowTime = new Date().toTimeString().slice(0,5);
+  document.getElementById('f-time-start').value = nowTime;
   if (journeys.length > 0) {
     document.getElementById('f-odo-start').value = journeys[0].odoEnd || '';
     updateDistPreview();
@@ -399,6 +412,8 @@ function saveJourney() {
   const odoStart = parseFloat(document.getElementById('f-odo-start').value);
   const odoEnd = parseFloat(document.getElementById('f-odo-end').value);
   const date = document.getElementById('f-date').value;
+  const timeStart = document.getElementById('f-time-start').value;
+  const timeEnd = document.getElementById('f-time-end').value;
   const notes = document.getElementById('f-notes').value.trim();
   const km = odoEnd - odoStart;
 
@@ -417,14 +432,16 @@ function saveJourney() {
     return;
   }
 
-  const entry = { id: Date.now(), date, from, to, purpose: currentPurpose, odoStart, odoEnd, km, notes };
+  const entry = { id: Date.now(), date, timeStart, timeEnd, from, to, purpose: currentPurpose, odoStart, odoEnd, km, notes };
   journeys.unshift(entry);
   save();
   updateHeader();
 
-  // Pre-fill next start odometer with this end odometer
+  // Pre-fill next start odometer & time with this journey's end values
   document.getElementById('f-odo-start').value = odoEnd;
   document.getElementById('f-odo-end').value = '';
+  document.getElementById('f-time-start').value = timeEnd;
+  document.getElementById('f-time-end').value = '';
   updateDistPreview();
 
   // Success flash
@@ -463,6 +480,16 @@ function setFilter(f) {
   renderHistory();
 }
 
+// ---- HELPERS ----
+function formatTime(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':');
+  const hr = parseInt(h);
+  const ampm = hr >= 12 ? 'pm' : 'am';
+  const hr12 = hr % 12 || 12;
+  return `${hr12}:${m}${ampm}`;
+}
+
 // ---- HISTORY ----
 function formatDate(d) {
   const dt = new Date(d + 'T00:00:00');
@@ -489,7 +516,7 @@ function renderHistory() {
             <span class="entry-date">${formatDate(j.date)}</span>
           </div>
           <div class="entry-route">${escHtml(j.from)} → ${escHtml(j.to)}</div>
-          <div class="entry-notes" style="margin-top:3px;font-size:12px;color:var(--label)">${j.odoStart ? j.odoStart.toLocaleString() + ' → ' + j.odoEnd.toLocaleString() + ' km odo' : ''}</div>
+          <div class="entry-notes" style="margin-top:3px;font-size:12px;color:var(--label)">${j.timeStart || j.timeEnd ? formatTime(j.timeStart) + (j.timeEnd ? ' – ' + formatTime(j.timeEnd) : '') + '&nbsp;&nbsp;·&nbsp;&nbsp;' : ''}${j.odoStart ? j.odoStart.toLocaleString() + ' → ' + j.odoEnd.toLocaleString() + ' km odo' : ''}</div>
           ${j.notes ? `<div class="entry-notes">${escHtml(j.notes)}</div>` : ''}
         </div>
         <div class="entry-km">
@@ -571,9 +598,9 @@ function renderSummary() {
 
 // ---- EXPORT CSV ----
 function exportCSV() {
-  const header = 'Date,From,To,Purpose,Start Odometer,End Odometer,Kilometres,Notes\n';
+  const header = 'Date,Start Time,End Time,From,To,Purpose,Start Odometer,End Odometer,Kilometres,Notes\n';
   const rows = journeys.map(j =>
-    `"${j.date}","${j.from}","${j.to}","${j.purpose}","${j.odoStart || ''}","${j.odoEnd || ''}","${j.km}","${j.notes}"`
+    `"${j.date}","${j.timeStart||''}","${j.timeEnd||''}","${j.from}","${j.to}","${j.purpose}","${j.odoStart || ''}","${j.odoEnd || ''}","${j.km}","${j.notes}"`
   ).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -587,10 +614,10 @@ function exportXLSX() {
   const wb = XLSX.utils.book_new();
 
   // ── Sheet 1: Journeys ──
-  const headerRow = ['Date', 'From', 'To', 'Purpose', 'Start Odometer', 'End Odometer', 'Kilometres', 'Notes'];
-  const dataRows = journeys.map(j => [j.date, j.from, j.to, j.purpose, j.odoStart || '', j.odoEnd || '', j.km, j.notes]);
+  const headerRow = ['Date', 'Start Time', 'End Time', 'From', 'To', 'Purpose', 'Start Odometer', 'End Odometer', 'Kilometres', 'Notes'];
+  const dataRows = journeys.map(j => [j.date, j.timeStart||'', j.timeEnd||'', j.from, j.to, j.purpose, j.odoStart || '', j.odoEnd || '', j.km, j.notes]);
   const total = journeys.reduce((s, j) => s + j.km, 0);
-  const totalRow = ['TOTAL', '', '', '', '', '', total, ''];
+  const totalRow = ['TOTAL', '', '', '', '', '', '', '', total, ''];
 
   const wsData = [headerRow, ...dataRows, totalRow];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -598,6 +625,8 @@ function exportXLSX() {
   // Column widths
   ws['!cols'] = [
     { wch: 14 }, // Date
+    { wch: 11 }, // Start Time
+    { wch: 11 }, // End Time
     { wch: 22 }, // From
     { wch: 22 }, // To
     { wch: 12 }, // Purpose
